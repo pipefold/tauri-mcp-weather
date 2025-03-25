@@ -20,7 +20,7 @@ pub fn run() {
             send_to_mcp_server
         ])
         .manage(McpServerState {
-            process: Some(Mutex::new(None)),
+            process: Mutex::new(None),
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
