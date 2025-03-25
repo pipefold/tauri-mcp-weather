@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import "./McpClient.css";
 
 interface WeatherData {
@@ -15,36 +15,61 @@ export default function McpClient() {
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [serverStatus, setServerStatus] = useState<string>("stopped");
   const [error, setError] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Start MCP server
   const startServer = async () => {
     try {
+      setIsLoading(true);
+      setError("");
+      setServerStatus("starting");
+
       const result = await invoke("start_mcp_server");
-      setServerStatus("running");
       console.log(result);
+
+      setServerStatus("running");
       // After starting server, fetch cities
       fetchCities();
     } catch (e) {
+      console.error("Failed to start server:", e);
       setError(`Failed to start MCP server: ${e}`);
+      setServerStatus("stopped");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   // Stop MCP server
   const stopServer = async () => {
     try {
+      setIsLoading(true);
+      setError("");
+      setServerStatus("stopping");
+
       const result = await invoke("stop_mcp_server");
+      console.log(result);
+
       setServerStatus("stopped");
       setCities([]);
       setWeatherData(null);
-      console.log(result);
     } catch (e) {
+      console.error("Failed to stop server:", e);
       setError(`Failed to stop MCP server: ${e}`);
+      // Keep the current server status
+    } finally {
+      setIsLoading(false);
     }
   };
 
   // Fetch list of cities from MCP server
   const fetchCities = async () => {
+    if (serverStatus !== "running") {
+      setError("Cannot fetch cities: MCP server not running");
+      return;
+    }
+
     try {
+      setError("");
       // MCP message to get the cities resource
       const message = JSON.stringify({
         jsonrpc: "2.0",
@@ -63,6 +88,7 @@ export default function McpClient() {
       // This is simplified for the example
       setCities(["New York", "London", "Tokyo", "Sydney", "Paris"]);
     } catch (e) {
+      console.error("Failed to fetch cities:", e);
       setError(`Failed to fetch cities: ${e}`);
     }
   };
@@ -70,8 +96,13 @@ export default function McpClient() {
   // Fetch weather data for a city using MCP tool
   const fetchWeatherData = async (city: string) => {
     if (!city) return;
+    if (serverStatus !== "running") {
+      setError("Cannot fetch weather data: MCP server not running");
+      return;
+    }
 
     try {
+      setError("");
       // MCP message to invoke the getWeather tool
       const message = JSON.stringify({
         jsonrpc: "2.0",
@@ -125,6 +156,7 @@ export default function McpClient() {
 
       setWeatherData(cityDataMap[city]);
     } catch (e) {
+      console.error("Failed to fetch weather data:", e);
       setError(`Failed to fetch weather data: ${e}`);
       setWeatherData(null);
     }
@@ -136,44 +168,51 @@ export default function McpClient() {
     fetchWeatherData(city);
   };
 
+  // Init effect
   useEffect(() => {
-    // Auto-start the server when component mounts
-    startServer();
-
-    // Cleanup on component unmount
-    return () => {
-      if (serverStatus === "running") {
-        stopServer();
-      }
-    };
+    // Don't auto-start on component mount
+    // Let the user explicitly click Start Server
   }, []);
+
+  // Get status text and style
+  const getStatusDisplay = () => {
+    switch (serverStatus) {
+      case "running":
+        return <span className="status-active">running</span>;
+      case "starting":
+        return <span className="status-pending">starting...</span>;
+      case "stopping":
+        return <span className="status-pending">stopping...</span>;
+      default:
+        return <span className="status-inactive">stopped</span>;
+    }
+  };
 
   return (
     <div className="mcp-client">
       <h2>MCP Weather Client</h2>
 
       <div className="server-controls">
-        <p>
-          Server Status:{" "}
-          <span
-            className={
-              serverStatus === "running" ? "status-active" : "status-inactive"
-            }
-          >
-            {serverStatus}
-          </span>
-        </p>
+        <p>Server Status: {getStatusDisplay()}</p>
         <div className="button-group">
           <button
             onClick={startServer}
-            disabled={serverStatus === "running"}
+            disabled={
+              isLoading ||
+              serverStatus === "running" ||
+              serverStatus === "starting"
+            }
             className="server-button start-button"
           >
             Start Server
           </button>
           <button
             onClick={stopServer}
-            disabled={serverStatus === "stopped"}
+            disabled={
+              isLoading ||
+              serverStatus === "stopped" ||
+              serverStatus === "stopping"
+            }
             className="server-button stop-button"
           >
             Stop Server
@@ -188,7 +227,7 @@ export default function McpClient() {
         <select
           value={selectedCity}
           onChange={(e) => handleCityChange(e.target.value)}
-          disabled={cities.length === 0}
+          disabled={cities.length === 0 || serverStatus !== "running"}
           className="city-select"
         >
           <option value="">Select a city</option>

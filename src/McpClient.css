@@ -30,6 +30,11 @@
   font-weight: bold;
 }
 
+.status-pending {
+  color: #ffc107;
+  font-weight: bold;
+}
+
 .button-group {
   display: flex;
   gap: 10px;

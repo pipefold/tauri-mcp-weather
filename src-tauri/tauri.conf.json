@@ -19,9 +19,6 @@
     ],
     "security": {
       "csp": null
-    },
-    "resources": {
-      "includes": ["src/mcp_weather_server.js", "src/node_modules/**/*"]
     }
   },
   "bundle": {
@@ -33,6 +30,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": ["src/mcp_weather_server.js", "src/node_modules/**/*"]
   }
 }

@@ -19,7 +19,9 @@ pub fn run() {
             stop_mcp_server,
             send_to_mcp_server
         ])
-        .manage(McpServerState { process: None })
+        .manage(McpServerState {
+            process: Some(Mutex::new(None)),
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

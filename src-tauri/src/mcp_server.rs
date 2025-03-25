@@ -11,7 +11,16 @@ pub struct McpServerState {
 
 // Start the MCP server as a child process
 #[command]
-pub fn start_mcp_server() -> Result<String, String> {
+pub fn start_mcp_server(state: tauri::State<'_, McpServerState>) -> Result<String, String> {
+    // Check if server is already running
+    if let Some(mutex) = &state.process {
+        if let Ok(guard) = mutex.lock() {
+            if guard.is_some() {
+                return Ok("MCP server is already running".to_string());
+            }
+        }
+    }
+
     let node_script_path = "./src-tauri/src/mcp_weather_server.js";
 
     // Start Node.js process with the MCP server script
@@ -22,25 +31,40 @@ pub fn start_mcp_server() -> Result<String, String> {
         .stderr(Stdio::piped())
         .spawn()
     {
-        Ok(child) => {
+        Ok(mut child) => {
             // Log server started
             let pid = child.id();
 
-            // Start a thread to log stdout/stderr
-            let mut stderr = BufReader::new(child.stderr.unwrap());
-            let mut stdout = BufReader::new(child.stdout.unwrap());
+            // Get handles to stdout/stderr before moving child into state
+            let stderr = child.stderr.take().unwrap();
+            let stdout = child.stdout.take().unwrap();
 
+            // Store the process in the state
+            if let Some(mutex) = &state.process {
+                if let Ok(mut guard) = mutex.lock() {
+                    *guard = Some(child);
+                } else {
+                    return Err("Failed to acquire lock to store MCP server process".to_string());
+                }
+            } else {
+                return Err("MCP server state is not initialized".to_string());
+            }
+
+            // Start a thread to log stdout
             thread::spawn(move || {
+                let mut reader = BufReader::new(stdout);
                 let mut line = String::new();
-                while stdout.read_line(&mut line).unwrap() > 0 {
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     println!("MCP SERVER OUT: {}", line.trim());
                     line.clear();
                 }
             });
 
+            // Start a thread to log stderr
             thread::spawn(move || {
+                let mut reader = BufReader::new(stderr);
                 let mut line = String::new();
-                while stderr.read_line(&mut line).unwrap() > 0 {
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     eprintln!("MCP SERVER ERR: {}", line.trim());
                     line.clear();
                 }
@@ -56,10 +80,21 @@ pub fn start_mcp_server() -> Result<String, String> {
 #[command]
 pub fn stop_mcp_server(state: tauri::State<'_, McpServerState>) -> Result<String, String> {
     if let Some(process_mutex) = &state.process {
-        if let Ok(mut process) = process_mutex.lock() {
-            match process.kill() {
-                Ok(_) => Ok("MCP server stopped".to_string()),
-                Err(e) => Err(format!("Failed to stop MCP server: {}", e)),
+        if let Ok(mut process_guard) = process_mutex.lock() {
+            if let Some(mut process) = process_guard.take() {
+                match process.kill() {
+                    Ok(_) => {
+                        // Process is now removed from state
+                        Ok("MCP server stopped".to_string())
+                    }
+                    Err(e) => {
+                        // Put the process back since we couldn't kill it
+                        *process_guard = Some(process);
+                        Err(format!("Failed to stop MCP server: {}", e))
+                    }
+                }
+            } else {
+                Ok("MCP server was not running".to_string())
             }
         } else {
             Err("Failed to acquire lock on MCP server process".to_string())
